@@ -1,4 +1,3 @@
-import { User } from "@/types/user";
 import { defineStore } from "pinia";
 import team from "../data/team.json";
 

@@ -5,7 +5,7 @@ import App from "./App.vue";
 import router from "./router";
 
 import { library } from "@fortawesome/fontawesome-svg-core";
-import { faLock, faHashtag } from "@fortawesome/free-solid-svg-icons";
+import { faLock, faHashtag, faXmark } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome";
 import { useSlackStore } from "./stores/slack";
 import { User } from "./types/user";
@@ -13,6 +13,7 @@ import team from "./data/team.json";
 
 library.add(faLock);
 library.add(faHashtag);
+library.add(faXmark);
 
 const app = createApp(App);
 

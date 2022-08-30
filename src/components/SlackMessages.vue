@@ -2,9 +2,8 @@
 import { ref, watch } from "vue";
 import SlackMessage from "./SlackMessage.vue";
 
-const props = defineProps<{
-  channel: any;
-}>();
+const props = defineProps<{ channel: any }>();
+const emit = defineEmits(["onOpenThread"]);
 
 const messages = ref(props.channel.messages.filter((m: any) => m.text));
 messages.value.sort((a: any, b: any) => a.ts - b.ts);
@@ -16,6 +15,10 @@ watch(
     messages.value.sort((a: any, b: any) => a.ts - b.ts);
   }
 );
+
+function openThread(message: any) {
+  emit("onOpenThread", message);
+}
 </script>
 
 <template>
@@ -36,6 +39,7 @@ watch(
         :message="message"
         v-for="message in messages"
         v-bind:key="message.id"
+        @on-open-thread="openThread(message)"
       />
     </div>
   </div>

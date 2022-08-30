@@ -3,21 +3,21 @@ import { ref, watch } from "vue";
 import { useSlackStore } from "../stores/slack";
 import slackMessageParser, { NodeType } from "slack-message-parser";
 import type { Node } from "slack-message-parser";
-import uEmojiParser from "universal-emoji-parser";
+import SlackReaction from "./SlackReaction.vue";
 import emojisJson from "../data/emojis.json";
+import { codemap } from "../slack-codemap";
+import twemoji from "twemoji";
 
 const emojis: { [key: string]: string } = Object.assign({}, emojisJson);
-// for (const key in emojiData) {
-//   emojis.push({
-//     name: key,
-//     url: emojiData[key],
-//   });
-// }
+const emit = defineEmits(["onOpenThread"]);
 
 const { getUserById } = useSlackStore();
-const props = defineProps<{
-  message: any;
-}>();
+const props = withDefaults(
+  defineProps<{ message: any; isThread?: boolean }>(),
+  {
+    isThread: false,
+  }
+);
 const user = ref(getUserById(props.message.user || props.message.bot_id));
 const messageText = ref("");
 
@@ -38,13 +38,22 @@ const toHTML = (node: Node): string => {
   }
 };
 
+function getFiles(files: any[], isImage: boolean) {
+  return files
+    ? files
+        .filter((f) => f.mimetype?.startsWith("image") == isImage)
+        .map((f) => {
+          f.ext = f.name.split(".").pop();
+          return f;
+        })
+    : [];
+}
+
 async function parseMessage() {
   let text = props.message.text;
   text = toHTML(slackMessageParser(text));
   text = text.replace(/<!channel>/g, `<span class="mention">@channel</span>`);
   text = text.replace(/<!here>/g, `<span class="mention">@here</span>`);
-  text = text.replace(/:\+1:/g, `:thumbsup:`);
-  text = uEmojiParser.parse(text);
   const links = text.match(/<http.*?>/g);
   if (links) {
     for (const link of links) {
@@ -79,7 +88,9 @@ async function parseMessage() {
       if (channel) {
         text = text.replace(
           channel,
-          `<a href="/channel/${channelId}"><span class="mention">#${channelName}</span></a>`
+          `<a href="/channel/${channelId}?pwd=${
+            import.meta.env.VITE_APP_PWD
+          }"><span class="mention">#${channelName}</span></a>`
         );
       }
     }
@@ -109,17 +120,37 @@ async function parseMessage() {
     }
   }
 
-  const emoji = text.match(/:.+?:/g);
+  const emoji = text.match(/:[^/~<>\n\r\s]+?:/g);
   if (emoji) {
     for (const e of emoji) {
-      const data = e.replace(/:/g, "");
-      const emoji = emojis[data];
-      if (emoji) {
-        text = text.replace(
-          e,
-          `<img class="emoji" src="/${emoji}" alt="${data}" />`
-        );
+      let path = "";
+      const slackEmoji = codemap[`${e}`];
+      if (slackEmoji) {
+        const html = twemoji.parse(slackEmoji);
+        const twiemojiPath = html.match(/src="(.+?)"/);
+        if (twiemojiPath) {
+          path = twiemojiPath[1];
+        }
       }
+
+      if (!path) {
+        const emojiPath = emojis[e.replace(/:/g, "")];
+        if (emojiPath) {
+          path = `/${emojiPath}`;
+        } else {
+          continue;
+        }
+      }
+
+      text = text.replace(e, `<img class="emoji" src="${path}" />`);
+    }
+  }
+
+  const backquotes = text.match(/^&gt; .+$/gm);
+  if (backquotes) {
+    for (const backquote of backquotes) {
+      const data = backquote.replace(/^&gt;\s+/gm, "");
+      text = text.replace(backquote, `<blockquote>${data}</blockquote>`);
     }
   }
 
@@ -135,37 +166,79 @@ watch(
     parseMessage();
   }
 );
+
+function openThread(message: any) {
+  emit("onOpenThread", message);
+}
 </script>
 
 <template>
   <div class="message">
     <img class="icon" :src="`/${user?.id}.png`" />
-    <div>
+    <div class="message_area">
       <div class="message_user">
         {{ user?.display_name }}
       </div>
       <div class="message_text" v-html="messageText"></div>
       <div class="files">
         <div
-          v-for="file in props.message.files.filter((f: any) =>
-            f.mimetype?.startsWith('image')
-          )"
+          v-for="file in getFiles(props.message.files, true)"
           v-bind:key="file.id"
         >
-          <a :href="`/${file.filepath}`" target="_blank">
-            <img class="photo" :src="`/${file.filepath}`" :alt="file.name" />
+          <a :href="`/${file.id}.${file.ext}`" target="_blank">
+            <img
+              class="photo"
+              :src="`/${file.id}.${file.ext}`"
+              :alt="file.name"
+            />
           </a>
         </div>
         <div
-          v-for="file in props.message.files.filter((f: any) =>
-            !f.mimetype?.startsWith('image')
-          )"
+          v-for="file in getFiles(props.message.files, false)"
           v-bind:key="file.id"
         >
-          <a :href="`/${file.filepath}`" target="_blank" class="file">
+          <a
+            :href="`/${file.id}.${file.ext}`"
+            target="_blank"
+            class="file"
+            :download="file.name"
+          >
             <div class="file_type">{{ file.filetype }}</div>
             <div class="file_name">{{ file.name }}</div>
           </a>
+        </div>
+      </div>
+      <div class="reactions" v-if="props.message.reactions">
+        <SlackReaction
+          v-for="reaction in props.message.reactions"
+          v-bind:key="reaction.name"
+          :emoji="reaction.name"
+          :count="reaction.count"
+        />
+      </div>
+      <div
+        class="replies"
+        v-if="props.message.reply_users && !isThread"
+        @click="openThread(message)"
+      >
+        <div class="reply_users">
+          <div
+            class="reply_icon"
+            v-for="user in props.message.reply_users.slice(0, 4)"
+            v-bind:key="user"
+          >
+            <img :src="`/${user}.png`" />
+          </div>
+          <div
+            class="reply_icon reply_icon_count"
+            v-if="props.message.reply_users[4]"
+          >
+            <img :src="`/${props.message.reply_users[4]}.png`" />
+            <div>+{{ props.message.reply_users.length - 5 }}</div>
+          </div>
+          <div class="reply_count">
+            {{ props.message.reply_count }} 件の返信
+          </div>
         </div>
       </div>
       <div class="json">{{ message }}</div>
@@ -211,6 +284,17 @@ b.code-b {
   vertical-align: sub;
   margin: 0px 2px;
 }
+blockquote {
+  border-left: 4px solid #dfdfdf;
+  padding-left: 12px;
+}
+
+.message_text {
+  * {
+    overflow-wrap: break-word;
+    word-break: break-all;
+  }
+}
 </style>
 
 <style scoped lang="scss">
@@ -245,6 +329,7 @@ b.code-b {
     color: white;
     background-color: #f0b372;
     border-radius: 4px;
+    overflow: hidden;
   }
 
   .file_name {
@@ -258,10 +343,10 @@ b.code-b {
   white-space: pre-wrap;
   display: flex;
   padding: 6px 16px;
-  max-width: calc(100vw - 280px);
+  max-width: min(calc(100vw - 280px), 100%);
 
   &:hover {
-    background-color: #f4f4f4;
+    background-color: #f6f6f6;
   }
 
   img.icon {
@@ -276,9 +361,14 @@ b.code-b {
     font-size: 14px;
   }
 
+  .message_area {
+    width: calc(100% - 52px);
+  }
+
   .message_text {
-    max-width: calc(100vw - 280px - 52px - 40px);
+    // max-width: calc(100vw - 280px - 52px - 40px);
     overflow-wrap: break-word;
+    word-break: break-all;
   }
   .json {
     display: none;
@@ -287,9 +377,80 @@ b.code-b {
     width: 300px;
     height: auto;
     margin-top: 8px;
-    margin-bottom: 8px;
     border: 1px solid #eee;
     border-radius: 6px;
   }
+}
+
+.reactions {
+  display: flex;
+  margin-top: 8px;
+  margin-bottom: 8px;
+}
+
+.reply_icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  margin-right: 4px;
+}
+
+.reply_users {
+  display: flex;
+  font-size: 12px;
+  color: #1264a3;
+  font-weight: bold;
+
+  .reply_icon {
+    width: 24px;
+    height: 24px;
+
+    img {
+      width: 24px;
+      height: 24px;
+      border-radius: 4px;
+    }
+  }
+
+  .reply_icon_count {
+    position: relative;
+
+    > * {
+      position: absolute;
+      top: 0px;
+      left: 0px;
+    }
+
+    div {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 24px;
+      height: 24px;
+      background-color: #0005;
+      color: white;
+      font-weight: bold;
+      border-radius: 4px;
+    }
+  }
+}
+
+.replies {
+  box-sizing: border-box;
+  padding: 4px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.1s ease-in-out;
+  width: 400px;
+}
+
+.replies:hover {
+  background: #fff;
+  border-color: #ccc;
+  border-radius: 6px;
+}
+
+.reply_count {
+  margin-left: 4px;
 }
 </style>

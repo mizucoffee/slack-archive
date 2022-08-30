@@ -17,7 +17,7 @@
     "pinia": "^2.0.17",
     "sass": "^1.54.5",
     "slack-message-parser": "^2.0.1",
-    "universal-emoji-parser": "^0.5.28",
+    "twemoji": "^14.0.2",
     "vue": "^3.2.37",
     "vue-router": "^4.1.3"
   },

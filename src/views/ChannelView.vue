@@ -3,12 +3,14 @@ import { useRoute, useRouter } from "vue-router";
 import { useSlackStore } from "../stores/slack";
 import SlackMessages from "../components/SlackMessages.vue";
 import { ref, watch } from "vue";
+import SlackThread from "../components/SlackThread.vue";
 
 const { team, channels, getChannelById } = useSlackStore();
 
 const route = useRoute();
 const router = useRouter();
 const channel = ref(getChannelById(`${route.params.channel}`));
+const threadMessage = ref<any | null>(null);
 if (!channel.value) {
   router.push(`/channel/${channels[0].id}`);
 }
@@ -19,6 +21,13 @@ watch(
     channel.value = getChannelById(`${route.params.channel}`);
   }
 );
+
+function onOpenThread(message: any) {
+  threadMessage.value = message;
+}
+function close() {
+  threadMessage.value = null;
+}
 </script>
 
 <template>
@@ -51,7 +60,8 @@ watch(
         </router-link>
       </div>
     </div>
-    <SlackMessages :channel="channel" />
+    <SlackMessages @on-open-thread="onOpenThread" :channel="channel" />
+    <SlackThread @close="close" :message="threadMessage" v-if="threadMessage" />
   </main>
 </template>
 
